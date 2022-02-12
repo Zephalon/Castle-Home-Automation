@@ -5,30 +5,24 @@
 #include <Wire.h>
 #include <BH1750.h>
 #include <RTCVars.h>
-
-// Wifi Settings
-#define SSID                          ""
-#define PASSWORD                      ""
+#include <credentials.h>
 
 // MQTT Settings
 #define HOSTNAME                      "light_sensor"
-#define MQTT_SERVER                   ""
-#define AVAILABILITY_TOPIC            "sensors/light_sensor/available"
-#define SENSOR_TOPIC                  "sensors/light_sensor"
-#define MQTT_USERNAME                 ""
-#define MQTT_PASSWORD                 ""
+#define AVAILABILITY_TOPIC            "sensors/" HOSTNAME "/available"
+#define SENSOR_TOPIC                  "sensors/" HOSTNAME
 #define MAXIMUM_INTERVAL              15
 
 const unsigned char One_Wire_Bus = 0;
 
-//Declare JSON variables
+// declare JSON variables
 DynamicJsonDocument mqttMessage(100);
 char mqttBuffer[100];
 
 OneWire oneWire(One_Wire_Bus);
 DallasTemperature sensors(&oneWire);
-WiFiClient wifiClient;                // Initiate WiFi library
-PubSubClient client(wifiClient);      // Initiate PubSubClient library
+WiFiClient wifiClient; // initiate WiFi library
+PubSubClient client(wifiClient); // initiate PubSubClient library
 RTCVars state; // create the state object
 
 BH1750 lightMeter;
@@ -77,9 +71,9 @@ void reconnectMQTT() {
     
   while (WiFi.status() == WL_CONNECTED && !client.connected()) {
     Serial.print("Attempting MQTT connection...");
-    if (client.connect(HOSTNAME, MQTT_USERNAME, MQTT_PASSWORD, AVAILABILITY_TOPIC, 1, true, "offline")) {       //Connect to MQTT server
+    if (client.connect(HOSTNAME, MQTT_USERNAME, MQTT_PASSWORD, AVAILABILITY_TOPIC, 1, true, "offline")) { // connect to MQTT server
       Serial.println("connected");
-      client.publish(AVAILABILITY_TOPIC, "online");         // Once connected, publish online to the availability topic
+      client.publish(AVAILABILITY_TOPIC, "online"); // once connected, publish online to the availability topic
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -129,7 +123,7 @@ void loop() {
     light_level = lightMeter.readLightLevel();
 
     // check if a new report is necessary
-    if (reset_counter > MAXIMUM_INTERVAL || abs(temperature - temperature_reported) > 0.2 || abs(light_level - light_level_reported) > 20) {
+    if (reset_counter > MAXIMUM_INTERVAL || abs(temperature - temperature_reported) > 0.2 || abs(light_level - light_level_reported) > light_level_reported * 0.1) {
       // send it
       Serial.println("Sending the data, Delta: " + (String)abs(temperature - temperature_reported) + " / " + (String)abs(light_level - light_level_reported));
       

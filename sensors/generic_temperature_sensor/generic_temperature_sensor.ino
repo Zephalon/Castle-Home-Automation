@@ -2,32 +2,31 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <DallasTemperature.h>
-
-// Wifi Settings
-#define SSID                          ""
-#define PASSWORD                      ""
+#include <Wire.h>
+#include <RTCVars.h>
+#include <credentials.h>
 
 // MQTT Settings
 #define HOSTNAME                      "temperature_sensor"
-#define MQTT_SERVER                   ""
-#define AVAILABILITY_TOPIC            "sensors/temperature_sensor/available"
-#define SENSOR_TOPIC                  "sensors/temperature_sensor"
-#define mqtt_username                 ""
-#define mqtt_password                 ""
+#define AVAILABILITY_TOPIC            "sensors/" HOSTNAME "/available"
+#define SENSOR_TOPIC                  "sensors/" HOSTNAME
+#define MAXIMUM_INTERVAL              15
 
-//Declare JSON variables
+const unsigned char One_Wire_Bus = 0;
+
+// declare JSON variables
 DynamicJsonDocument mqttMessage(100);
 char mqttBuffer[100];
 
-// Pins
-const unsigned char One_Wire_Bus = 4;
-
 OneWire oneWire(One_Wire_Bus);
 DallasTemperature sensors(&oneWire);
-WiFiClient wifiClient;                // Initiate WiFi library
-PubSubClient client(wifiClient);      // Initiate PubSubClient library
+WiFiClient wifiClient; // initiate WiFi library
+PubSubClient client(wifiClient); // initiate PubSubClient library
+RTCVars state; // create the state object
 
 float temperature;
+float temperature_reported;
+int reset_counter;
 
 void connectWIFI() {
   int wifi_retry = 0;
@@ -63,9 +62,11 @@ void connectWIFI() {
 }
 
 void reconnectMQTT() {
+  client.setServer(MQTT_SERVER, 1883);
+    
   while (WiFi.status() == WL_CONNECTED && !client.connected()) {
     Serial.print("Attempting MQTT connection...");
-    if (client.connect(HOSTNAME, mqtt_username, mqtt_password, AVAILABILITY_TOPIC, 1, true, "offline")) { // connect to MQTT server
+    if (client.connect(HOSTNAME, MQTT_USERNAME, MQTT_PASSWORD, AVAILABILITY_TOPIC, 1, true, "offline")) { // connect to MQTT server
       Serial.println("connected");
       client.publish(AVAILABILITY_TOPIC, "online"); // once connected, publish online to the availability topic
     } else {
@@ -81,69 +82,73 @@ void reconnectMQTT() {
   }
 }
 
-void MqttCallback(char* topic, byte* payload, unsigned int length) {
-  // void
-}
-
 void setup() {
   Serial.begin(57600);
   while (!Serial);
   delay(100);
 
+  Wire.begin();
+
   pinMode(BUILTIN_LED, OUTPUT);
-  digitalWrite(BUILTIN_LED, LOW);
 
-  delay(500);
+  // keep these variables
+  state.registerVar( &reset_counter );
+  state.registerVar( &temperature_reported );
 
-  digitalWrite(BUILTIN_LED, HIGH);
+  if (state.loadFromRTC()) {
+    // there was something stored in the RTC
+    reset_counter++;
+    Serial.println("Minutes since last report: " + (String)reset_counter);
+  } else {
+    // cold boot
+    reset_counter = 0;
+    temperature_reported = -273;
+    Serial.println("This seems to be a cold boot.");
+  }
 
-  delay(500);
-
-  connectWIFI();
-
-  client.setServer(MQTT_SERVER, 1883);
-  client.setCallback(MqttCallback);
-
-  reconnectMQTT();
-
-  digitalWrite(BUILTIN_LED, LOW);
+   state.saveToRTC();
 }
 
 void loop() {
-     if (WiFi.status() != WL_CONNECTED) {
-      connectWIFI();
-    }
-
-    if (!client.connected()) {
-      reconnectMQTT();
-    }
-
-    if (WiFi.status() == WL_CONNECTED && client.connected()) {
-      digitalWrite(BUILTIN_LED, LOW); // redundant
-    } else {
-      digitalWrite(BUILTIN_LED, HIGH);
-    }
-
     sensors.requestTemperatures();
     temperature = sensors.getTempCByIndex(0);
 
-    if (!isnan(temperature)) {
+    // check if a new report is necessary
+    if (reset_counter > MAXIMUM_INTERVAL || abs(temperature - temperature_reported) > 0.1) {
+      // send it
+      Serial.println("Sending the data, Delta: " + (String)abs(temperature - temperature_reported));
+      
+      if (WiFi.status() != WL_CONNECTED) {
+        connectWIFI();
+      }
+  
+      if (!client.connected()) {
+        reconnectMQTT();
+      }
+  
+      if (WiFi.status() == WL_CONNECTED && client.connected()) {
+        digitalWrite(BUILTIN_LED, LOW); // redundant
+      } else {
+        digitalWrite(BUILTIN_LED, HIGH);
+      }
+  
       mqttMessage["sensor"] = HOSTNAME;
       mqttMessage["status"] = "data";
       mqttMessage["temperature"] = temperature;
-
+  
       size_t mqttMessageSize = serializeJson(mqttMessage, mqttBuffer);
-      client.publish(SENSOR_TOPIC, mqttBuffer, mqttMessageSize);
+      if (client.publish(SENSOR_TOPIC, mqttBuffer, mqttMessageSize)) {
+        Serial.println("Data sent, TOPIC: " + (String)SENSOR_TOPIC);
+      }
+  
+      temperature_reported = temperature;
 
-      Serial.println(temperature);
-
-      delay(100);
-
-      ESP.deepSleep(15 * 60 * 1000000);
-    } else {
-      Serial.println("Unable to read sensor values.");
-      delay(3000);
+      reset_counter = 0;
     }
 
+    state.saveToRTC();
+
     delay(100);
+
+    ESP.deepSleep(60 * 1000000); // sleep for one minute
 }
