@@ -1,3 +1,3 @@
-# Castle-Home-Automation
+# maker
 
-Various (still undocumented) home automation projects. More to come!
+Various (still undocumented) projects. More documentation to come!
