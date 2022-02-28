@@ -1,7 +1,7 @@
 /**
  * YAMAHA Analogue IR Controller
  * 
- * This project uses the IR08-H IR tranceiver to control a YAMAHA soundbar
+ * This project utilises the IR08-H IR tranceiver to control a YAMAHA YSP-1100 soundbar
  * 
  * @author: Fabian Prinz-Arnold
  */
@@ -19,7 +19,8 @@ uint8_t output_stereo[5]={0xA1, 0xF1, 0x78, 0x87, 0x50};
 
 // settings
 int max_volume = 60;
-int minimum_delay = 300; // ms
+int minimum_delay = 300; // minimum delay between IR commands, in ms
+int volume_sleep_timer = 3000; // time until the volume control needs to be reactivated, in ms
 
 // setup
 int current_volume = 0;
@@ -32,14 +33,16 @@ int incoming_byte = 0; // for incoming serial data
 
 void setup() {
   Serial.begin(9600);     // open serial port, set data rate to 9600 bps
-  
+
+  // set pin mode for buttons
   pinMode(2, INPUT);
   pinMode(3, INPUT);
 
+  // do stuff if buttons are pressed
   attachInterrupt(digitalPinToInterrupt(2), leftButtonInterrupt, RISING);
   attachInterrupt(digitalPinToInterrupt(3), rightButtonInterrupt, RISING);
 
-  delay(3000); // give it time to boot
+  delay(2000); // give it time to boot
 
   Serial.write(output_5beam, 5); // reset to default mode
 
@@ -78,12 +81,13 @@ void loop() {
     last_potentiometer_reading = potentiometer_reading;
 
     // the device needs to be active to change the volume
-    if (idle > 33) Serial.write(decrease_volume, 5);
-    if (idle > 33) Serial.println(" -> ACTIVATE");
-    idle = 0;
+    if (idle > volume_sleep_timer / minimum_delay) {
+      Serial.write(decrease_volume, 5);
+    }
 
     Serial.write(current_volume > requested_volume ? decrease_volume : increase_volume, 5);
     current_volume = current_volume > requested_volume ? current_volume = current_volume - 1 : current_volume = current_volume + 1;
+    idle = 0;
     
     Serial.print(" -> Volume: ");
     Serial.print(requested_volume);
@@ -98,11 +102,11 @@ void loop() {
 
 void leftButtonInterrupt() {
   Serial.println("left pressed");
-  Serial.write(mute_volume, 5);
+  Serial.write(stereo_mode ? output_5beam : output_st3beam, 5);
+  stereo_mode = !stereo_mode;
 }
 
 void rightButtonInterrupt() {
   Serial.println("right pressed");
-  Serial.write(stereo_mode ? output_5beam : output_stereo, 5);
-  stereo_mode = !stereo_mode;
+  Serial.write(mute_volume, 5);
 }
