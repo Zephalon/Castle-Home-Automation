@@ -7,17 +7,18 @@
  */
 
 // define IR codes
-uint8_t increase_volume[5]={0xA1, 0xF1, 0x78, 0x87, 0x1E};
-uint8_t decrease_volume[5]={0xA1, 0xF1, 0x78, 0x87, 0x1F};
-uint8_t mute_volume[5]={0xA1, 0xF1, 0x78, 0x87, 0x9C};
-uint8_t input_dvd[5]={0xA1, 0xF1, 0x78, 0x87, 0x4A};
-uint8_t input_aux[5]={0xA1, 0xF1, 0x78, 0x87, 0xDE};
-uint8_t output_5beam[5]={0xA1, 0xF1, 0x78, 0x87, 0xC2};
-uint8_t output_st3beam[5]={0xA1, 0xF1, 0x78, 0x87, 0xC3};
-uint8_t output_3beam[5]={0xA1, 0xF1, 0x78, 0x87, 0xC4};
-uint8_t output_stereo[5]={0xA1, 0xF1, 0x78, 0x87, 0x50};
+uint8_t increase_volume[5] =  {0xA1, 0xF1, 0x78, 0x87, 0x1E};
+uint8_t decrease_volume[5] =  {0xA1, 0xF1, 0x78, 0x87, 0x1F};
+uint8_t mute_volume[5] =      {0xA1, 0xF1, 0x78, 0x87, 0x9C};
+uint8_t input_dvd[5] =        {0xA1, 0xF1, 0x78, 0x87, 0x4A};
+uint8_t input_aux[5] =        {0xA1, 0xF1, 0x78, 0x87, 0xDE};
+uint8_t output_5beam[5] =     {0xA1, 0xF1, 0x78, 0x87, 0xC2};
+uint8_t output_st3beam[5] =   {0xA1, 0xF1, 0x78, 0x87, 0xC3};
+uint8_t output_3beam[5] =     {0xA1, 0xF1, 0x78, 0x87, 0xC4};
+uint8_t output_stereo[5] =    {0xA1, 0xF1, 0x78, 0x87, 0x50};
 
 // settings
+int min_volume = 15;
 int max_volume = 60;
 int minimum_delay = 300; // minimum delay between IR commands, in ms
 int volume_sleep_timer = 3000; // time until the volume control needs to be reactivated, in ms
@@ -28,6 +29,8 @@ int requested_volume = 0;
 int idle = 0;
 int last_potentiometer_reading = 0;
 bool stereo_mode = false;
+bool muted = false;
+int volume_range = max_volume - min_volume;
 
 int incoming_byte = 0; // for incoming serial data
 
@@ -42,7 +45,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(2), leftButtonInterrupt, RISING);
   attachInterrupt(digitalPinToInterrupt(3), rightButtonInterrupt, RISING);
 
-  delay(2000); // give it time to boot
+  delay(1000); // give it time to boot
 
   Serial.write(output_5beam, 5); // reset to default mode
 
@@ -53,16 +56,34 @@ void setup() {
     Serial.print(" -> Volume: ");
     Serial.println(max_volume - x);
     Serial.write(decrease_volume, 5);
-    delay(300);
+    delay(minimum_delay);
   }
   Serial.println("ready");
 }
 
 void loop() {
-  int potentiometer_reading = 1024 - analogRead(A0); // reversed
+  int potentiometer_reading = analogRead(A0);
+  int requested_percent = potentiometer_reading / 10.21; // scaled to 100
 
   // filter out any noisy readings and scale the output to maximum volume
-  if (abs(potentiometer_reading - last_potentiometer_reading) > 20) requested_volume = potentiometer_reading / 10.21 * (max_volume * 0.01);
+  if (abs(potentiometer_reading - last_potentiometer_reading) > 20) {
+    if (muted) {
+      // activate if muted
+      Serial.write(mute_volume, 5);
+      muted = false;
+      delay(minimum_delay);
+    }
+
+    if (requested_percent <= 1 && !muted) {
+      // mute
+      Serial.write(mute_volume, 5);
+      muted = true;
+      delay(minimum_delay);
+    } else {
+      // get requested volume
+      requested_volume = requested_percent * (volume_range * 0.01) + min_volume;
+    }
+  }
   
   // this part is only needed to read incoming IR codes
   /*
@@ -76,10 +97,10 @@ void loop() {
   }
   */
 
-  // change volume if needed
-  if (requested_volume != current_volume) {
-    last_potentiometer_reading = potentiometer_reading;
+  last_potentiometer_reading = potentiometer_reading;
 
+  // change volume if needed
+  if (!muted && requested_volume != current_volume) {
     // the device needs to be active to change the volume
     if (idle > volume_sleep_timer / minimum_delay) {
       Serial.write(decrease_volume, 5);
@@ -94,7 +115,7 @@ void loop() {
     Serial.print(" => ");
     Serial.println(current_volume);
   } else {
-    idle = idle >= 100 ? 100 : idle + 1; // count the idle cycles to decide, if the device is sleeping
+    idle = idle >= 100 ? 100 : idle + 1; // count the idle cycles to decide if the device is sleeping
   }
  
   delay(minimum_delay);
@@ -109,4 +130,5 @@ void leftButtonInterrupt() {
 void rightButtonInterrupt() {
   Serial.println("right pressed");
   Serial.write(mute_volume, 5);
+  muted = !muted;
 }
