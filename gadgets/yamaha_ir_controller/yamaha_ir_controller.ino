@@ -1,5 +1,5 @@
 /**
- * YAMAHA Analogue IR Controller
+ * Analog IR Soundbar Controller
  * 
  * This project utilises the IR08-H IR tranceiver to control a YAMAHA YSP-1100 soundbar
  * 
@@ -18,8 +18,8 @@ uint8_t output_3beam[5] =     {0xA1, 0xF1, 0x78, 0x87, 0xC4};
 uint8_t output_stereo[5] =    {0xA1, 0xF1, 0x78, 0x87, 0x50};
 
 // settings
-int min_volume = 15;
-int max_volume = 60;
+int min_volume = 5;
+int max_volume = 40;
 int minimum_delay = 300; // minimum delay between IR commands, in ms
 int volume_sleep_timer = 3000; // time until the volume control needs to be reactivated, in ms
 
@@ -27,7 +27,7 @@ int volume_sleep_timer = 3000; // time until the volume control needs to be reac
 int current_volume = 0;
 int requested_volume = 0;
 int idle = 0;
-int last_potentiometer_reading = 0;
+int last_potentiometer_reading = -1;
 bool stereo_mode = false;
 bool muted = false;
 int volume_range = max_volume - min_volume;
@@ -35,7 +35,7 @@ int volume_range = max_volume - min_volume;
 int incoming_byte = 0; // for incoming serial data
 
 void setup() {
-  Serial.begin(9600);     // open serial port, set data rate to 9600 bps
+  Serial.begin(9600); // open serial port, set data rate to 9600 bps
 
   // set pin mode for buttons
   pinMode(2, INPUT);
@@ -47,57 +47,57 @@ void setup() {
 
   delay(1000); // give it time to boot
 
-  Serial.write(output_5beam, 5); // reset to default mode
-
+  // reset to default output mode
+  Serial.write(output_5beam, 5);
   delay(minimum_delay);
 
   // reset volume to 0
   for (int x = 0; x <= max_volume; x++) {
-    Serial.print(" -> Volume: ");
+    Serial.print(" Reset -> Volume: ");
     Serial.println(max_volume - x);
     Serial.write(decrease_volume, 5);
     delay(minimum_delay);
   }
-  Serial.println("ready");
+  Serial.println("Setup done.");
 }
 
 void loop() {
   int potentiometer_reading = analogRead(A0);
   int requested_percent = potentiometer_reading / 10.21; // scaled to 100
 
-  // filter out any noisy readings and scale the output to maximum volume
-  if (abs(potentiometer_reading - last_potentiometer_reading) > 20) {
+  // this part is only needed to read incoming IR codes
+  if (Serial.available() > 0) {
+    // read the incoming byte:
+    incoming_byte = Serial.read();
+  
+    // say what you got:
+    Serial.print("I received: ");
+    Serial.println(incoming_byte, HEX);
+  }
+
+  // filter out any noisy readings
+  if (last_potentiometer_reading == -1 || abs(potentiometer_reading - last_potentiometer_reading) > 10) {
+    // activate if muted
     if (muted) {
-      // activate if muted
       Serial.write(mute_volume, 5);
       muted = false;
       delay(minimum_delay);
     }
 
-    if (requested_percent <= 1 && !muted) {
+    // check if the sound should be muted
+    if (potentiometer_reading <= 10 && !muted) {
       // mute
       Serial.write(mute_volume, 5);
+      Serial.println(" => Mute ");
       muted = true;
       delay(minimum_delay);
     } else {
       // get requested volume
       requested_volume = requested_percent * (volume_range * 0.01) + min_volume;
     }
-  }
-  
-  // this part is only needed to read incoming IR codes
-  /*
-  if (Serial.available() > 0) {
-          // read the incoming byte:
-          incoming_byte = Serial.read();
 
-          // say what you got:
-          Serial.print("I received: ");
-          Serial.println(incoming_byte, HEX);
+    last_potentiometer_reading = potentiometer_reading; // save last reading
   }
-  */
-
-  last_potentiometer_reading = potentiometer_reading;
 
   // change volume if needed
   if (!muted && requested_volume != current_volume) {
